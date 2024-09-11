@@ -20,6 +20,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -84,10 +85,13 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="recordType"> Type the should be queried </param>
 		/// <param name="recordClass"> Class the should be queried </param>
 		/// <returns> A list of matching <see cref="DnsRecordBase">records</see> </returns>
-		public List<T> Resolve<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet)
+		public IEnumerable<T> Resolve<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet)
 			where T : DnsRecordBase
 		{
-			return ResolveAsync<T>(name, recordType, recordClass).GetAwaiter().GetResult();
+			var enumerator = ResolveAsync<T>(name, recordType, recordClass).GetAsyncEnumerator();
+
+			while (enumerator.MoveNextAsync().GetAwaiter().GetResult())
+				yield return enumerator.Current;
 		}
 
 		/// <summary>
@@ -99,14 +103,15 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="recordClass"> Class the should be queried </param>
 		/// <param name="token"> The token to monitor cancellation requests </param>
 		/// <returns> A list of matching <see cref="DnsRecordBase">records</see> </returns>
-		public async Task<List<T>> ResolveAsync<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, CancellationToken token = default(CancellationToken))
+		public async IAsyncEnumerable<T> ResolveAsync<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, [EnumeratorCancellation] CancellationToken token = default(CancellationToken))
 			where T : DnsRecordBase
 		{
 			_ = name ?? throw new ArgumentNullException(nameof(name), "Name must be provided");
 
 			var res = await ResolveSecureAsync<T>(name, recordType, recordClass, token);
 
-			return res.Records;
+			foreach (var record in res.Records)
+				yield return record;
 		}
 
 		/// <summary>

@@ -17,6 +17,7 @@
 #endregion
 
 using System.Net;
+using System.Runtime.CompilerServices;
 
 namespace ARSoft.Tools.Net.Dns
 {
@@ -71,24 +72,28 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="recordType"> Type the should be queried </param>
 		/// <param name="recordClass"> Class the should be queried </param>
 		/// <returns> A list of matching <see cref="DnsRecordBase">records</see> </returns>
-		public List<T> Resolve<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet)
+		public IEnumerable<T> Resolve<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet)
 			where T : DnsRecordBase
 		{
 			_ = name ?? throw new ArgumentNullException(nameof(name), "Name must be provided");
 
-			return ResolveInternal<T>(name, recordType, recordClass, new ResolveLoopProtector());
+			foreach (var recordList in ResolveInternal<T>(name, recordType, recordClass, new ResolveLoopProtector()))
+				foreach (var record in recordList)
+					yield return record;
 		}
 
-		private List<T> ResolveInternal<T>(DomainName name, RecordType recordType, RecordClass recordClass, ResolveLoopProtector resolveLoopProtector) where T : DnsRecordBase
+		private IEnumerable<List<T>> ResolveInternal<T>(DomainName name, RecordType recordType, RecordClass recordClass, ResolveLoopProtector resolveLoopProtector) where T : DnsRecordBase
 		{
 			using (resolveLoopProtector.AddOrThrow(name, recordType, recordClass))
 			{
 				if (_cache.TryGetRecords(name, recordType, recordClass, out List<T>? records))
 				{
-					return records!;
+					yield return records!;
 				}
 
-				DnsMessage? msg = _dnsClient.Resolve(name, recordType, recordClass);
+                _cache.Remove(name, recordType, recordClass);
+
+                DnsMessage? msg = _dnsClient.Resolve(name, recordType, recordClass);
 
 				if ((msg == null) || ((msg.ReturnCode != ReturnCode.NoError) && (msg.ReturnCode != ReturnCode.NxDomain)))
 				{
@@ -103,15 +108,18 @@ namespace ARSoft.Tools.Net.Dns
 					if (records.Count > 0)
 					{
 						_cache.Add(name, recordType, recordClass, records, DnsSecValidationResult.Indeterminate, records.Min(x => x.TimeToLive));
-						return records;
+						yield return records;
 					}
 
-					records = ResolveInternal<T>(cName.CanonicalName, recordType, recordClass, resolveLoopProtector);
+					var recordLists = ResolveInternal<T>(cName.CanonicalName, recordType, recordClass, resolveLoopProtector);
 
-					if (records.Count > 0)
-						_cache.Add(name, recordType, recordClass, records, DnsSecValidationResult.Indeterminate, records.Min(x => x.TimeToLive));
+					foreach (var recordList in recordLists)
+					{
+						if (recordList.Count > 0)
+							_cache.Add(name, recordType, recordClass, recordList, DnsSecValidationResult.Indeterminate, recordList.Min(x => x.TimeToLive));
 
-					return records;
+						yield return recordList;
+					}
 				}
 
 				records = msg.AnswerRecords.Where(x => x.Name.Equals(name)).OfType<T>().ToList();
@@ -119,7 +127,7 @@ namespace ARSoft.Tools.Net.Dns
 				if (records.Count > 0)
 					_cache.Add(name, recordType, recordClass, records, DnsSecValidationResult.Indeterminate, records.Min(x => x.TimeToLive));
 
-				return records;
+				yield return records;
 			}
 		}
 
@@ -132,24 +140,28 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="recordClass"> Class the should be queried </param>
 		/// <param name="token"> The token to monitor cancellation requests </param>
 		/// <returns> A list of matching <see cref="DnsRecordBase">records</see> </returns>
-		public async Task<List<T>> ResolveAsync<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, CancellationToken token = default(CancellationToken))
+		public async IAsyncEnumerable<T> ResolveAsync<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, [EnumeratorCancellation] CancellationToken token = default(CancellationToken))
 			where T : DnsRecordBase
 		{
 			_ = name ?? throw new ArgumentNullException(nameof(name), "Name must be provided");
 
-			return await ResolveAsyncInternal<T>(name, recordType, recordClass, token, new ResolveLoopProtector());
+			await foreach (var recordList in ResolveAsyncInternal<T>(name, recordType, recordClass, token, new ResolveLoopProtector()))
+				foreach (var record in recordList)
+					yield return record;
 		}
 
-		private async Task<List<T>> ResolveAsyncInternal<T>(DomainName name, RecordType recordType, RecordClass recordClass, CancellationToken token, ResolveLoopProtector resolveLoopProtector) where T : DnsRecordBase
+		private async IAsyncEnumerable<List<T>> ResolveAsyncInternal<T>(DomainName name, RecordType recordType, RecordClass recordClass, [EnumeratorCancellation] CancellationToken token, ResolveLoopProtector resolveLoopProtector) where T : DnsRecordBase
 		{
 			using (resolveLoopProtector.AddOrThrow(name, recordType, recordClass))
 			{
 				if (_cache.TryGetRecords(name, recordType, recordClass, out List<T>? records))
 				{
-					return records!;
+					yield return records!;
 				}
 
-				var msg = await _dnsClient.ResolveAsync(name, recordType, recordClass, DnsQueryOptions.DefaultQueryOptions, token);
+                _cache.Remove(name, recordType, recordClass);
+
+                var msg = await _dnsClient.ResolveAsync(name, recordType, recordClass, DnsQueryOptions.DefaultQueryOptions, token);
 
 				if ((msg == null) || ((msg.ReturnCode != ReturnCode.NoError) && (msg.ReturnCode != ReturnCode.NxDomain)))
 				{
@@ -164,15 +176,18 @@ namespace ARSoft.Tools.Net.Dns
 					if (records.Count > 0)
 					{
 						_cache.Add(name, recordType, recordClass, records, DnsSecValidationResult.Indeterminate, Math.Min(cName.TimeToLive, records.Min(x => x.TimeToLive)));
-						return records;
+                        yield return records;
 					}
 
-					records = await ResolveAsyncInternal<T>(cName.CanonicalName, recordType, recordClass, token, resolveLoopProtector);
+					var recordLists = ResolveAsyncInternal<T>(cName.CanonicalName, recordType, recordClass, token, resolveLoopProtector);
 
-					if (records.Count > 0)
-						_cache.Add(name, recordType, recordClass, records, DnsSecValidationResult.Indeterminate, Math.Min(cName.TimeToLive, records.Min(x => x.TimeToLive)));
+					await foreach (var recordList in recordLists)
+					{
+						if (recordList.Count > 0)
+							_cache.Add(name, recordType, recordClass, recordList, DnsSecValidationResult.Indeterminate, Math.Min(cName.TimeToLive, recordList.Min(x => x.TimeToLive)));
 
-					return records;
+						yield return recordList;
+					}
 				}
 
 				records = msg.AnswerRecords.Where(x => x.Name.Equals(name)).OfType<T>().ToList();
@@ -180,7 +195,7 @@ namespace ARSoft.Tools.Net.Dns
 				if (records.Count > 0)
 					_cache.Add(name, recordType, recordClass, records, DnsSecValidationResult.Indeterminate, records.Min(x => x.TimeToLive));
 
-				return records;
+                yield return records;
 			}
 		}
 

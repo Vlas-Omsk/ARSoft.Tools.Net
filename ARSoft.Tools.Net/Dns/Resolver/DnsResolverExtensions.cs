@@ -20,6 +20,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,19 +38,17 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="resolver"> The resolver instance, that should be used for queries </param>
 		/// <param name="name"> Host name, that should be queried </param>
 		/// <returns> A list of matching host addresses </returns>
-		public static List<IPAddress> ResolveHost(this IDnsResolver resolver, DomainName name)
+		public static IEnumerable<IPAddress> ResolveHost(this IDnsResolver resolver, DomainName name)
 		{
-			List<IPAddress> result = new List<IPAddress>();
-
-			List<AaaaRecord> aaaaRecords = resolver.Resolve<AaaaRecord>(name, RecordType.Aaaa);
+			var aaaaRecords = resolver.Resolve<AaaaRecord>(name, RecordType.Aaaa);
 			if (aaaaRecords != null)
-				result.AddRange(aaaaRecords.Select(x => x.Address));
+				foreach (var aaaaRecord in aaaaRecords)
+                    yield return aaaaRecord.Address;
 
-			List<ARecord> aRecords = resolver.Resolve<ARecord>(name);
+			var aRecords = resolver.Resolve<ARecord>(name);
 			if (aRecords != null)
-				result.AddRange(aRecords.Select(x => x.Address));
-
-			return result;
+				foreach (var aRecord in aRecords)
+                    yield return aRecord.Address;
 		}
 
 		/// <summary>
@@ -58,7 +57,7 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="resolver"> The resolver instance, that should be used for queries </param>
 		/// <param name="name"> Host name, that should be queried </param>
 		/// <returns> A list of matching host addresses </returns>
-		public static List<IPAddress> ResolveHost(this IDnsResolver resolver, string name)
+		public static IEnumerable<IPAddress> ResolveHost(this IDnsResolver resolver, string name)
 		{
 			return resolver.ResolveHost(DomainName.Parse(name));
 		}
@@ -70,20 +69,18 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="name"> Host name, that should be queried </param>
 		/// <param name="token"> The token to monitor cancellation requests </param>
 		/// <returns> A list of matching host addresses </returns>
-		public static async Task<List<IPAddress>> ResolveHostAsync(this IDnsResolver resolver, DomainName name, CancellationToken token = default(CancellationToken))
+		public static async IAsyncEnumerable<IPAddress> ResolveHostAsync(this IDnsResolver resolver, DomainName name, [EnumeratorCancellation] CancellationToken token = default(CancellationToken))
 		{
-			List<IPAddress> result = new List<IPAddress>();
+            var aaaaRecords = resolver.ResolveAsync<AaaaRecord>(name, RecordType.Aaaa, token: token);
+            if (aaaaRecords != null)
+                await foreach (var aaaaRecord in aaaaRecords)
+                    yield return aaaaRecord.Address;
 
-			List<AaaaRecord> aaaaRecords = await resolver.ResolveAsync<AaaaRecord>(name, RecordType.Aaaa, token: token);
-			if (aaaaRecords != null)
-				result.AddRange(aaaaRecords.Select(x => x.Address));
-
-			List<ARecord> aRecords = await resolver.ResolveAsync<ARecord>(name, token: token);
+            var aRecords = resolver.ResolveAsync<ARecord>(name, token: token);
 			if (aRecords != null)
-				result.AddRange(aRecords.Select(x => x.Address));
-
-			return result;
-		}
+				await foreach (var aRecord in aRecords)
+					yield return aRecord.Address;
+        }
 
 		/// <summary>
 		///   Queries a dns resolver for IP addresses of a host as an asynchronous operation.
@@ -92,7 +89,7 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="name"> Host name, that should be queried </param>
 		/// <param name="token"> The token to monitor cancellation requests </param>
 		/// <returns> A list of matching host addresses </returns>
-		public static Task<List<IPAddress>> ResolveHostAsync(this IDnsResolver resolver, string name, CancellationToken token = default(CancellationToken))
+		public static IAsyncEnumerable<IPAddress> ResolveHostAsync(this IDnsResolver resolver, string name, CancellationToken token = default(CancellationToken))
 		{
 			return resolver.ResolveHostAsync(DomainName.Parse(name), token);
 		}
@@ -105,7 +102,7 @@ namespace ARSoft.Tools.Net.Dns
 		/// <returns> The reverse name of the IP address </returns>
 		public static DomainName? ResolvePtr(this IDnsResolver resolver, IPAddress address)
 		{
-			List<PtrRecord> ptrRecords = resolver.Resolve<PtrRecord>(address.GetReverseLookupDomain(), RecordType.Ptr);
+			var ptrRecords = resolver.Resolve<PtrRecord>(address.GetReverseLookupDomain(), RecordType.Ptr);
 			return ptrRecords.Select(x => x.PointerDomainName).FirstOrDefault();
 		}
 
@@ -118,8 +115,12 @@ namespace ARSoft.Tools.Net.Dns
 		/// <returns> The reverse name of the IP address </returns>
 		public static async Task<DomainName?> ResolvePtrAsync(this IDnsResolver resolver, IPAddress address, CancellationToken token = default(CancellationToken))
 		{
-			List<PtrRecord> ptrRecords = await resolver.ResolveAsync<PtrRecord>(address.GetReverseLookupDomain(), RecordType.Ptr, token: token);
-			return ptrRecords.Select(x => x.PointerDomainName).FirstOrDefault();
+			var ptrRecords = resolver.ResolveAsync<PtrRecord>(address.GetReverseLookupDomain(), RecordType.Ptr, token: token);
+
+			await foreach (var ptrRecord in ptrRecords)
+				return ptrRecord.PointerDomainName;
+
+			return null;
 		}
 
 		/// <summary>
@@ -131,7 +132,7 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="recordType"> Type the should be queried </param>
 		/// <param name="recordClass"> Class the should be queried </param>
 		/// <returns> A list of matching <see cref="DnsRecordBase">records</see> </returns>
-		public static List<T> Resolve<T>(this IDnsResolver resolver, string name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet)
+		public static IEnumerable<T> Resolve<T>(this IDnsResolver resolver, string name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet)
 			where T : DnsRecordBase
 		{
 			return resolver.Resolve<T>(DomainName.Parse(name), recordType, recordClass);
@@ -147,7 +148,7 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="recordClass"> Class the should be queried </param>
 		/// <param name="token"> The token to monitor cancellation requests </param>
 		/// <returns> A list of matching <see cref="DnsRecordBase">records</see> </returns>
-		public static Task<List<T>> ResolveAsync<T>(this IDnsResolver resolver, string name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, CancellationToken token = default(CancellationToken))
+		public static IAsyncEnumerable<T> ResolveAsync<T>(this IDnsResolver resolver, string name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, CancellationToken token = default(CancellationToken))
 			where T : DnsRecordBase
 		{
 			return resolver.ResolveAsync<T>(DomainName.Parse(name), recordType, recordClass, token);

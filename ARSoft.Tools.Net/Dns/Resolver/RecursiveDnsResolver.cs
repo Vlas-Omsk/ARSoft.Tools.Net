@@ -18,6 +18,7 @@
 
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 
 namespace ARSoft.Tools.Net.Dns
 {
@@ -94,10 +95,13 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="recordType"> Type the should be queried </param>
 		/// <param name="recordClass"> Class the should be queried </param>
 		/// <returns> A list of matching <see cref="DnsRecordBase">records</see> </returns>
-		public List<T> Resolve<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet)
+		public IEnumerable<T> Resolve<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet)
 			where T : DnsRecordBase
 		{
-			return ResolveAsync<T>(name, recordType, recordClass).GetAwaiter().GetResult();
+			var enumerator = ResolveAsync<T>(name, recordType, recordClass).GetAsyncEnumerator();
+
+			while (enumerator.MoveNextAsync().GetAwaiter().GetResult())
+				yield return enumerator.Current;
 		}
 
 		/// <summary>
@@ -109,12 +113,13 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="recordClass"> Class the should be queried </param>
 		/// <param name="token"> The token to monitor cancellation requests </param>
 		/// <returns> A list of matching <see cref="DnsRecordBase">records</see> </returns>
-		public Task<List<T>> ResolveAsync<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, CancellationToken token = default(CancellationToken))
+		public async IAsyncEnumerable<T> ResolveAsync<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, [EnumeratorCancellation] CancellationToken token = default(CancellationToken))
 			where T : DnsRecordBase
 		{
 			_ = name ?? throw new ArgumentNullException(nameof(name), "Name must be provided");
 
-			return ResolveAsyncInternal<T>(name, recordType, recordClass, new ResolveContext(), token);
+			foreach (var item in await ResolveAsyncInternal<T>(name, recordType, recordClass, new ResolveContext(), token))
+				yield return item;
 		}
 
 		private async Task<DnsMessage> ResolveMessageAsync(DomainName name, RecordType recordType, RecordClass recordClass, ResolveContext state, CancellationToken token)

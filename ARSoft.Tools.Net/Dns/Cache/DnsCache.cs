@@ -29,7 +29,7 @@ namespace ARSoft.Tools.Net.Dns
 		public DnsSecValidationResult ValidationResult { get; set; }
 	}
 
-	internal class DnsCache
+    internal class DnsCache
 	{
 		private class CacheKey
 		{
@@ -99,6 +99,12 @@ namespace ARSoft.Tools.Net.Dns
 			_cache.TryAdd(key, new CacheValue(records, timeToLive));
 		}
 
+		public void Remove(DomainName name, RecordType recordType, RecordClass recordClass)
+		{
+            CacheKey key = new CacheKey(name, recordType, recordClass);
+            _cache.TryRemove(key, out _);
+        }
+
 		public bool TryGetRecords<TRecord>(DomainName name, RecordType recordType, RecordClass recordClass, out List<TRecord>? records)
 			where TRecord : DnsRecordBase
 		{
@@ -110,9 +116,8 @@ namespace ARSoft.Tools.Net.Dns
 			{
 				if (cacheValue.ExpireDateUtc < utcNow)
 				{
-					_cache.TryRemove(key, out cacheValue);
 					records = null;
-					return false;
+                    return false;
 				}
 
 				int ttl = (int) (cacheValue.ExpireDateUtc - utcNow).TotalSeconds;
@@ -129,11 +134,11 @@ namespace ARSoft.Tools.Net.Dns
 						return record;
 					}));
 
-				return true;
+                return true;
 			}
 
 			records = null;
-			return false;
+            return false;
 		}
 
 		public bool TryGetRecords<TRecord>(DomainName name, RecordType recordType, RecordClass recordClass, out DnsCacheRecordList<TRecord>? records)
@@ -147,9 +152,8 @@ namespace ARSoft.Tools.Net.Dns
 			{
 				if (cacheValue.ExpireDateUtc < utcNow)
 				{
-					_cache.TryRemove(key, out cacheValue);
 					records = null;
-					return false;
+                    return false;
 				}
 
 				int ttl = (int) (cacheValue.ExpireDateUtc - utcNow).TotalSeconds;
@@ -168,11 +172,11 @@ namespace ARSoft.Tools.Net.Dns
 
 				records.ValidationResult = cacheValue.Records.ValidationResult;
 
-				return true;
+                return true;
 			}
 
 			records = null;
-			return false;
+            return false;
 		}
 
 		public void RemoveExpiredItems()
