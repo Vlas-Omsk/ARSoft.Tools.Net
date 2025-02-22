@@ -472,14 +472,9 @@ namespace ARSoft.Tools.Net.Spf
 		{
 			try
 			{
-				var records = DnsResolver.ResolveAsync<TRecord>(domain, recordType, token: token);
+				var records = (await DnsResolver.ResolveAsync<TRecord>(domain, recordType, token: token)).ToList();
 
-				var recordsList = new List<TRecord>();
-
-				await foreach (var record in records)
-					recordsList.Add(record);
-
-				return new DnsResolveResult<TRecord>(ReturnCode.NoError, recordsList);
+				return new DnsResolveResult<TRecord>(ReturnCode.NoError, records);
 			}
 			catch
 			{

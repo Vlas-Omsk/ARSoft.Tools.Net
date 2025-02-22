@@ -27,6 +27,8 @@ using System.Threading.Tasks;
 
 namespace ARSoft.Tools.Net.Dns
 {
+	/* #FIXME
+	
 	/// <summary>
 	///   <para>Self validating security aware stub resolver</para>
 	///   <para>
@@ -149,7 +151,7 @@ namespace ARSoft.Tools.Net.Dns
 		{
 			using (resolveLoopProtector.AddOrThrow(name, recordType, recordClass))
 			{
-				if (_cache.TryGetRecords(name, recordType, recordClass, out DnsCacheRecordList<T>? cacheResult))
+				if (_cache.TryGetRecords(name, recordType, recordClass, out CacheRecordList<T>? cacheResult))
 				{
 					return new DnsSecResult<T>(cacheResult!, cacheResult!.ValidationResult);
 				}
@@ -248,4 +250,5 @@ namespace ARSoft.Tools.Net.Dns
 			Dispose(false);
 		}
 	}
+	*/
 }

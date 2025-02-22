@@ -16,8 +16,10 @@
 // limitations under the License.
 #endregion
 
+using System.Linq;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace ARSoft.Tools.Net.Dns
 {
@@ -77,57 +79,86 @@ namespace ARSoft.Tools.Net.Dns
 		{
 			_ = name ?? throw new ArgumentNullException(nameof(name), "Name must be provided");
 
-			foreach (var recordList in ResolveInternal<T>(name, recordType, recordClass, new ResolveLoopProtector()))
-				foreach (var record in recordList)
-					yield return record;
-		}
+            var cacheItem = _cache.GetAndLock(new DnsCache.CacheKey(name, recordType, recordClass));
 
-		private IEnumerable<List<T>> ResolveInternal<T>(DomainName name, RecordType recordType, RecordClass recordClass, ResolveLoopProtector resolveLoopProtector) where T : DnsRecordBase
+            if (cacheItem.State == PoolCacheItemState.Success)
+            {
+                cacheItem.Release();
+
+                return cacheItem.Value!.Records.List.OfType<T>();
+            }
+            else if (cacheItem.State == PoolCacheItemState.Failed)
+            {
+                // Continue processing
+            }
+            else if (cacheItem.State == PoolCacheItemState.Pending)
+            {
+                // Continue processing
+            }
+            else
+            {
+                throw new NotSupportedException("State not supported");
+            }
+
+            try
+            {
+                var records = ResolveInternal<T>(name, recordType, recordClass, new ResolveLoopProtector()).ToList();
+
+                cacheItem.SetSuccessAnsRelease(
+                    new DnsCache.CacheValue(
+                        new DnsCache.CacheRecordList(records, DnsSecValidationResult.Indeterminate),
+                        records.Count == 0 ? 0 : records.Min(x => x.TimeToLive)
+                    )
+                );
+
+				return records;
+            }
+            catch (Exception ex)
+            {
+                cacheItem.SetFailedAndRelease(ex);
+
+                throw new Exception("Resolve failed", ex);
+            }
+        }
+
+		private IEnumerable<T> ResolveInternal<T>(DomainName name, RecordType recordType, RecordClass recordClass, ResolveLoopProtector resolveLoopProtector) where T : DnsRecordBase
 		{
 			using (resolveLoopProtector.AddOrThrow(name, recordType, recordClass))
 			{
-				if (_cache.TryGetRecords(name, recordType, recordClass, out List<T>? records))
-				{
-					yield return records!;
-				}
+				DnsMessage? msg = _dnsClient.Resolve(name, recordType, recordClass);
 
-                _cache.Remove(name, recordType, recordClass);
-
-                DnsMessage? msg = _dnsClient.Resolve(name, recordType, recordClass);
-
-				if ((msg == null) || ((msg.ReturnCode != ReturnCode.NoError) && (msg.ReturnCode != ReturnCode.NxDomain)))
+				if ((msg == null) ||
+					((msg.ReturnCode != ReturnCode.NoError) && (msg.ReturnCode != ReturnCode.NxDomain)))
 				{
 					throw new Exception("DNS request failed");
 				}
 
-				CNameRecord? cName = msg.AnswerRecords.Where(x => (x.RecordType == RecordType.CName) && (x.RecordClass == recordClass) && x.Name.Equals(name)).OfType<CNameRecord>().FirstOrDefault();
+				CNameRecord? cName = msg.AnswerRecords
+					.Where(x => 
+						(x.RecordType == RecordType.CName) &&
+						(x.RecordClass == recordClass) &&
+						x.Name.Equals(name)
+					)
+					.OfType<CNameRecord>()
+					.FirstOrDefault();
 
 				if (recordType != RecordType.CName && cName != null)
 				{
-					records = msg.AnswerRecords.Where(x => x.Name.Equals(cName.CanonicalName)).OfType<T>().ToList();
-					if (records.Count > 0)
-					{
-						_cache.Add(name, recordType, recordClass, records, DnsSecValidationResult.Indeterminate, records.Min(x => x.TimeToLive));
-						yield return records;
-					}
+					var answerCnameRecords = msg.AnswerRecords.Where(x => x.Name.Equals(cName.CanonicalName)).OfType<T>();
 
-					var recordLists = ResolveInternal<T>(cName.CanonicalName, recordType, recordClass, resolveLoopProtector);
+					foreach (var record in answerCnameRecords)
+						yield return record;
 
-					foreach (var recordList in recordLists)
-					{
-						if (recordList.Count > 0)
-							_cache.Add(name, recordType, recordClass, recordList, DnsSecValidationResult.Indeterminate, recordList.Min(x => x.TimeToLive));
+					var nextRecords = ResolveInternal<T>(cName.CanonicalName, recordType, recordClass, resolveLoopProtector);
 
-						yield return recordList;
-					}
+                    foreach (var record in nextRecords)
+                        yield return record;
 				}
 
-				records = msg.AnswerRecords.Where(x => x.Name.Equals(name)).OfType<T>().ToList();
+                var answerRecords = msg.AnswerRecords.Where(x => x.Name.Equals(name)).OfType<T>();
 
-				if (records.Count > 0)
-					_cache.Add(name, recordType, recordClass, records, DnsSecValidationResult.Indeterminate, records.Min(x => x.TimeToLive));
-
-				yield return records;
+                foreach (var record in answerRecords)
+                    yield return record;
 			}
 		}
 
@@ -140,63 +171,99 @@ namespace ARSoft.Tools.Net.Dns
 		/// <param name="recordClass"> Class the should be queried </param>
 		/// <param name="token"> The token to monitor cancellation requests </param>
 		/// <returns> A list of matching <see cref="DnsRecordBase">records</see> </returns>
-		public async IAsyncEnumerable<T> ResolveAsync<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, [EnumeratorCancellation] CancellationToken token = default(CancellationToken))
+		public async Task<IEnumerable<T>> ResolveAsync<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, CancellationToken token = default)
 			where T : DnsRecordBase
 		{
 			_ = name ?? throw new ArgumentNullException(nameof(name), "Name must be provided");
 
-			await foreach (var recordList in ResolveAsyncInternal<T>(name, recordType, recordClass, token, new ResolveLoopProtector()))
-				foreach (var record in recordList)
-					yield return record;
+            var cacheItem = _cache.GetAndLock(new DnsCache.CacheKey(name, recordType, recordClass));
+
+            if (cacheItem.State == PoolCacheItemState.Success)
+            {
+                cacheItem.Release();
+
+                return cacheItem.Value!.Records.List.OfType<T>();
+            }
+            else if (cacheItem.State == PoolCacheItemState.Failed)
+            {
+                // Continue processing
+            }
+            else if (cacheItem.State == PoolCacheItemState.Pending)
+            {
+                // Continue processing
+            }
+            else
+            {
+                throw new NotSupportedException("State not supported");
+            }
+
+			cacheItem.SetTask(async cancellationToken =>
+			{
+				try
+				{
+					var records = await ResolveAsyncInternal<T>(name, recordType, recordClass, cancellationToken, new ResolveLoopProtector()).ToListAsync(cancellationToken);
+
+					cacheItem.SetSuccessAnsRelease(
+						new DnsCache.CacheValue(
+							new DnsCache.CacheRecordList(records, DnsSecValidationResult.Indeterminate),
+							records.Count == 0 ? 0 : records.Min(x => x.TimeToLive)
+						)
+					);
+				}
+				catch (Exception ex)
+				{
+					cacheItem.SetFailedAndRelease(ex);
+
+                    throw new Exception("Resolve failed", ex);
+                }
+			});
+
+			await cacheItem.WaitAsync(token);
+
+			return cacheItem.Value!.Records.List.OfType<T>();
 		}
 
-		private async IAsyncEnumerable<List<T>> ResolveAsyncInternal<T>(DomainName name, RecordType recordType, RecordClass recordClass, [EnumeratorCancellation] CancellationToken token, ResolveLoopProtector resolveLoopProtector) where T : DnsRecordBase
+		private async IAsyncEnumerable<T> ResolveAsyncInternal<T>(DomainName name, RecordType recordType, RecordClass recordClass, [EnumeratorCancellation] CancellationToken token, ResolveLoopProtector resolveLoopProtector) where T : DnsRecordBase
 		{
 			using (resolveLoopProtector.AddOrThrow(name, recordType, recordClass))
 			{
-				if (_cache.TryGetRecords(name, recordType, recordClass, out List<T>? records))
-				{
-					yield return records!;
-				}
-
-                _cache.Remove(name, recordType, recordClass);
-
                 var msg = await _dnsClient.ResolveAsync(name, recordType, recordClass, DnsQueryOptions.DefaultQueryOptions, token);
 
-				if ((msg == null) || ((msg.ReturnCode != ReturnCode.NoError) && (msg.ReturnCode != ReturnCode.NxDomain)))
-				{
-					throw new Exception("DNS request failed");
-				}
+                if ((msg == null) ||
+                    ((msg.ReturnCode != ReturnCode.NoError) && (msg.ReturnCode != ReturnCode.NxDomain)))
+                {
+                    throw new Exception("DNS request failed");
+                }
 
-				var cName = msg.AnswerRecords.Where(x => (x.RecordType == RecordType.CName) && (x.RecordClass == recordClass) && x.Name.Equals(name)).OfType<CNameRecord>().FirstOrDefault();
+                var cName = msg.AnswerRecords
+                    .Where(x =>
+                        (x.RecordType == RecordType.CName) &&
+                        (x.RecordClass == recordClass) &&
+                        x.Name.Equals(name)
+                    )
+                    .OfType<CNameRecord>()
+                    .FirstOrDefault();
 
-				if (cName != null)
-				{
-					records = msg.AnswerRecords.Where(x => (x.RecordType == recordType) && (x.RecordClass == recordClass) && x.Name.Equals(cName.CanonicalName)).OfType<T>().ToList();
-					if (records.Count > 0)
-					{
-						_cache.Add(name, recordType, recordClass, records, DnsSecValidationResult.Indeterminate, Math.Min(cName.TimeToLive, records.Min(x => x.TimeToLive)));
-                        yield return records;
-					}
+                var records = new List<T>();
 
-					var recordLists = ResolveAsyncInternal<T>(cName.CanonicalName, recordType, recordClass, token, resolveLoopProtector);
+                if (cName != null)
+                {
+                    var answerCnameRecords = msg.AnswerRecords.Where(x => x.Name.Equals(cName.CanonicalName)).OfType<T>();
 
-					await foreach (var recordList in recordLists)
-					{
-						if (recordList.Count > 0)
-							_cache.Add(name, recordType, recordClass, recordList, DnsSecValidationResult.Indeterminate, Math.Min(cName.TimeToLive, recordList.Min(x => x.TimeToLive)));
+					foreach (var record in answerCnameRecords)
+						yield return record;
 
-						yield return recordList;
-					}
-				}
+                    var nextRecords = ResolveAsyncInternal<T>(cName.CanonicalName, recordType, recordClass, token, resolveLoopProtector);
 
-				records = msg.AnswerRecords.Where(x => x.Name.Equals(name)).OfType<T>().ToList();
+					await foreach (var record in nextRecords)
+                        yield return record;
+                }
 
-				if (records.Count > 0)
-					_cache.Add(name, recordType, recordClass, records, DnsSecValidationResult.Indeterminate, records.Min(x => x.TimeToLive));
+                var answerRecords = msg.AnswerRecords.Where(x => x.Name.Equals(name)).OfType<T>();
 
-                yield return records;
-			}
+                foreach (var record in answerRecords)
+                    yield return record;
+            }
 		}
 
 		/// <summary>

@@ -50,12 +50,12 @@ namespace ARSoft.Tools.Net.Dns
         /// <param name="recordClass"> Class the should be queried </param>
         /// <param name="token"> The token to monitor cancellation requests </param>
         /// <returns> A list of matching <see cref="DnsRecordBase">records</see> </returns>
-        IAsyncEnumerable<T> ResolveAsync<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, CancellationToken token = default(CancellationToken))
+        Task<IEnumerable<T>> ResolveAsync<T>(DomainName name, RecordType recordType = RecordType.A, RecordClass recordClass = RecordClass.INet, CancellationToken token = default(CancellationToken))
 			where T : DnsRecordBase;
 
-		/// <summary>
-		///   Clears the record cache
-		/// </summary>
-		void ClearCache();
+        /// <summary>
+        ///   Clears the record cache
+        /// </summary>
+        void ClearCache();
 	}
 }

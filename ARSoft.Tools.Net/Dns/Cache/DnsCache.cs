@@ -21,17 +21,33 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
+using System.Threading;
 
 namespace ARSoft.Tools.Net.Dns
 {
-	internal class DnsCacheRecordList<T> : List<T>
-	{
-		public DnsSecValidationResult ValidationResult { get; set; }
-	}
+	internal enum PoolCacheItemState
+    {
+        Pending,
+        Success,
+        Failed
+    }
 
     internal class DnsCache
 	{
-		private class CacheKey
+        public class CacheRecordList
+        {
+            public IReadOnlyCollection<DnsRecordBase> List { get; }
+            public DnsSecValidationResult ValidationResult { get; }
+
+            public CacheRecordList(IReadOnlyCollection<DnsRecordBase> list, DnsSecValidationResult validationResult)
+            {
+                List = list;
+                ValidationResult = validationResult;
+            }
+        }
+
+        public class CacheKey
 		{
 			private readonly DomainName _name;
 			private readonly RecordClass _recordClass;
@@ -69,126 +85,215 @@ namespace ARSoft.Tools.Net.Dns
 			}
 		}
 
-		private class CacheValue
+		public class CacheValue
 		{
 			public DateTime ExpireDateUtc { get; }
-			public DnsCacheRecordList<DnsRecordBase> Records { get; }
+			public CacheRecordList Records { get; }
 
-			public CacheValue(DnsCacheRecordList<DnsRecordBase> records, int timeToLive)
+			public CacheValue(CacheRecordList records, int timeToLive)
 			{
 				Records = records;
 				ExpireDateUtc = DateTime.UtcNow.AddSeconds(timeToLive);
 			}
 		}
 
-		private readonly ConcurrentDictionary<CacheKey, CacheValue> _cache = new ConcurrentDictionary<CacheKey, CacheValue>();
+        public sealed class CachedItem
+        {
+            private readonly SemaphoreSlim _lock = new(1, 1);
+            private readonly CancellationTokenSource _cancellationTokenSource = new();
+            private Task? _task;
 
-		public void Add<TRecord>(DomainName name, RecordType recordType, RecordClass recordClass, IEnumerable<TRecord> records, DnsSecValidationResult validationResult, int timeToLive)
-			where TRecord : DnsRecordBase
-		{
-			DnsCacheRecordList<DnsRecordBase> cacheValues = new DnsCacheRecordList<DnsRecordBase>();
-			cacheValues.AddRange(records);
-			cacheValues.ValidationResult = validationResult;
+            public PoolCacheItemState State { get; private set; } = PoolCacheItemState.Pending;
+            public CacheValue? Value { get; private set; }
+            public Exception? Exception { get; private set; }
 
-			Add(name, recordType, recordClass, cacheValues, timeToLive);
-		}
+            public void SetSuccessAnsRelease(CacheValue item)
+            {
+                if (State == PoolCacheItemState.Success)
+                {
+                    _lock.Release();
 
-		public void Add(DomainName name, RecordType recordType, RecordClass recordClass, DnsCacheRecordList<DnsRecordBase> records, int timeToLive)
-		{
-			CacheKey key = new CacheKey(name, recordType, recordClass);
-			_cache.TryAdd(key, new CacheValue(records, timeToLive));
-		}
+                    return;
+                }
+                else if (State == PoolCacheItemState.Pending)
+                {
+                }
+                else if (State == PoolCacheItemState.Failed)
+                {
+                }
+                else
+                {
+                    _lock.Release();
 
-		public void Remove(DomainName name, RecordType recordType, RecordClass recordClass)
-		{
-            CacheKey key = new CacheKey(name, recordType, recordClass);
-            _cache.TryRemove(key, out _);
+                    throw new NotSupportedException($"State '{State}' of cached item not supported in current context");
+                }
+
+                _task = null;
+                Value = item;
+                State = PoolCacheItemState.Success;
+
+                _lock.Release();
+            }
+
+            public void SetTask(Func<CancellationToken, Task> func)
+            {
+                if (State != PoolCacheItemState.Pending)
+                    throw new NotSupportedException($"State '{State}' of cached item not supported in current context");
+
+                _task = func(_cancellationTokenSource.Token);
+            }
+
+            public void SetFailedAndRelease(Exception exception)
+            {
+                if (State == PoolCacheItemState.Failed)
+                {
+                    _lock.Release();
+
+                    return;
+                }
+                else if (State == PoolCacheItemState.Pending)
+                {
+                }
+                else if (State == PoolCacheItemState.Success)
+                {
+                }
+                else
+                {
+                    _lock.Release();
+
+                    throw new NotSupportedException($"State '{State}' of cached item not supported in current context");
+                }
+
+                _task = null;
+
+                if (CheckAll(exception, x => x is OperationCanceledException))
+                {
+                    State = PoolCacheItemState.Pending;
+                }
+                else
+                {
+                    Exception = exception;
+                    State = PoolCacheItemState.Failed;
+                }
+
+                _lock.Release();
+            }
+
+            public async Task ResetAndRelease()
+            {
+                if (State == PoolCacheItemState.Pending)
+                {
+                    _lock.Release();
+
+                    return;
+                }
+                else if (State == PoolCacheItemState.Failed)
+                {
+                }
+                else if (State == PoolCacheItemState.Success)
+                {
+                }
+                else
+                {
+                    _lock.Release();
+
+                    throw new NotSupportedException($"State '{State}' of cached item not supported in current context");
+                }
+
+                if (Value is IAsyncDisposable asyncDisposable)
+                    await asyncDisposable.DisposeAsync();
+                else if (Value is IDisposable disposable)
+                    disposable.Dispose();
+
+                _task = null;
+                Value = null;
+                State = PoolCacheItemState.Pending;
+
+                _lock.Release();
+            }
+
+            public void Throw()
+            {
+                if (CheckAll(Exception!, x => x is OperationCanceledException))
+                    throw new OperationCanceledException("Cached item was cancelled", Exception);
+
+                throw new Exception("Cached item was failed", Exception);
+            }
+
+            public void Wait()
+            {
+                _task!.GetAwaiter().GetResult();
+            }
+
+            public Task WaitAsync(CancellationToken cancellationToken)
+            {
+                return _task!.WaitAsync(cancellationToken);
+            }
+
+            public void Lock()
+            {
+                _lock.Wait();
+            }
+
+            public Task LockAsync(CancellationToken cancellationToken)
+            {
+                return _lock.WaitAsync(cancellationToken);
+            }
+
+            public void Release()
+            {
+                _lock.Release();
+            }
         }
 
-		public bool TryGetRecords<TRecord>(DomainName name, RecordType recordType, RecordClass recordClass, out List<TRecord>? records)
-			where TRecord : DnsRecordBase
-		{
-			CacheKey key = new CacheKey(name, recordType, recordClass);
-			DateTime utcNow = DateTime.UtcNow;
+        private readonly ConcurrentDictionary<CacheKey, CachedItem> _cache = new();
+        private int _disposing = 0;
 
-			CacheValue? cacheValue;
-			if (_cache.TryGetValue(key, out cacheValue))
-			{
-				if (cacheValue.ExpireDateUtc < utcNow)
-				{
-					records = null;
-                    return false;
-				}
+        private static bool CheckAll(Exception self, Func<Exception, bool> func)
+        {
+            if (self is AggregateException aggregateException)
+                return aggregateException.InnerExceptions.All(x => CheckAll(x, func));
 
-				int ttl = (int) (cacheValue.ExpireDateUtc - utcNow).TotalSeconds;
+            return func(self);
+        }
 
-				records = new List<TRecord>();
+        public CachedItem GetAndLock(CacheKey key)
+        {
+            if (_disposing == 1)
+                throw new ObjectDisposedException("Object disposing");
 
-				records.AddRange(cacheValue
-					.Records
-					.OfType<TRecord>()
-					.Select(x =>
-					{
-						TRecord record = x.Clone<TRecord>();
-						record.TimeToLive = ttl;
-						return record;
-					}));
+            var cachedItem = _cache.GetOrAdd(key, (_) => new CachedItem());
 
-                return true;
-			}
+            cachedItem.Lock();
 
-			records = null;
-            return false;
-		}
+            return cachedItem;
+        }
 
-		public bool TryGetRecords<TRecord>(DomainName name, RecordType recordType, RecordClass recordClass, out DnsCacheRecordList<TRecord>? records)
-			where TRecord : DnsRecordBase
-		{
-			CacheKey key = new CacheKey(name, recordType, recordClass);
-			DateTime utcNow = DateTime.UtcNow;
+        public async Task<CachedItem> GetAsync(CacheKey key, CancellationToken cancellationToken)
+        {
+            if (_disposing == 1)
+                throw new ObjectDisposedException("Object disposing");
 
-			CacheValue? cacheValue;
-			if (_cache.TryGetValue(key, out cacheValue))
-			{
-				if (cacheValue.ExpireDateUtc < utcNow)
-				{
-					records = null;
-                    return false;
-				}
+            var cachedItem = _cache.GetOrAdd(key, (_) => new CachedItem());
 
-				int ttl = (int) (cacheValue.ExpireDateUtc - utcNow).TotalSeconds;
+            await cachedItem.LockAsync(cancellationToken);
 
-				records = new DnsCacheRecordList<TRecord>();
+            return cachedItem;
+        }
 
-				records.AddRange(cacheValue
-					.Records
-					.OfType<TRecord>()
-					.Select(x =>
-					{
-						TRecord record = x.Clone<TRecord>();
-						record.TimeToLive = ttl;
-						return record;
-					}));
-
-				records.ValidationResult = cacheValue.Records.ValidationResult;
-
-                return true;
-			}
-
-			records = null;
-            return false;
-		}
-
-		public void RemoveExpiredItems()
+		public async Task RemoveExpiredItems(CancellationToken cancellationToken)
 		{
 			DateTime utcNow = DateTime.UtcNow;
 
 			foreach (var kvp in _cache)
 			{
-				CacheValue? tmp;
-				if (kvp.Value.ExpireDateUtc < utcNow)
-					_cache.TryRemove(kvp.Key, out tmp);
-			}
+                await kvp.Value.LockAsync(cancellationToken);
+
+                if (kvp.Value.Value!.ExpireDateUtc < utcNow)
+                    await kvp.Value.ResetAndRelease();
+                else
+                    kvp.Value.Release();
+            }
 		}
 	}
 }

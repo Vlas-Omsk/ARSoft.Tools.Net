@@ -33,6 +33,8 @@ namespace ARSoft.Tools.Net
 	/// </summary>
 	public static class X509Certificate2Extensions
 	{
+		/* #FIXME
+		
 		/// <summary>
 		///   Verifies a S/MIME certificate using SMIMEA DNS records.
 		/// </summary>
@@ -73,6 +75,7 @@ namespace ARSoft.Tools.Net
 
 			return false;
 		}
+		*/
 
 		private static DomainName GetSMimeAName(string mail)
 		{

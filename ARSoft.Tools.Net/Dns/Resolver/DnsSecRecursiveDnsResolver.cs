@@ -22,6 +22,8 @@ using System.Runtime.CompilerServices;
 
 namespace ARSoft.Tools.Net.Dns;
 
+/* #FIXME
+
 /// <summary>
 ///   <para>Recursive resolver</para>
 ///   <para>
@@ -230,12 +232,12 @@ public class DnsSecRecursiveDnsResolver : IDnsSecResolver, IInternalDnsSecResolv
 	{
 		using (resolveContext.LoopProtector.AddOrThrow(name, recordType, recordClass))
 		{
-			if (_cache.TryGetRecords(name, recordType, recordClass, out DnsCacheRecordList<T>? cachedResults))
+			if (_cache.TryGetRecords(name, recordType, recordClass, out CacheRecordList<T>? cachedResults))
 			{
 				return new DnsSecResult<T>(cachedResults!, cachedResults!.ValidationResult);
 			}
 
-			if (_cache.TryGetRecords(name, RecordType.CName, recordClass, out DnsCacheRecordList<CNameRecord>? cachedCNames))
+			if (_cache.TryGetRecords(name, RecordType.CName, recordClass, out CacheRecordList<CNameRecord>? cachedCNames))
 			{
 				var canonicalName = cachedCNames!.First().CanonicalName;
 				var cNameResult = await ResolveAsyncInternal<T>(canonicalName, recordType, recordClass, resolveContext, token);
@@ -368,3 +370,4 @@ public class DnsSecRecursiveDnsResolver : IDnsSecResolver, IInternalDnsSecResolv
 		Dispose(false);
 	}
 }
+*/

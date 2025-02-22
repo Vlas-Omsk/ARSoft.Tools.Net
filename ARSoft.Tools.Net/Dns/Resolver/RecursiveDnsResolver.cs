@@ -22,6 +22,8 @@ using System.Runtime.CompilerServices;
 
 namespace ARSoft.Tools.Net.Dns
 {
+	/* #FIXME
+	
 	/// <summary>
 	///   <para>Recursive resolver</para>
 	///   <para>
@@ -303,4 +305,5 @@ namespace ARSoft.Tools.Net.Dns
 			Dispose(false);
 		}
 	}
+	*/
 }
