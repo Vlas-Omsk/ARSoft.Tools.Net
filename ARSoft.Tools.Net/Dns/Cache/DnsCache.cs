@@ -23,6 +23,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Threading;
+using System.Diagnostics;
 
 namespace ARSoft.Tools.Net.Dns
 {
@@ -102,6 +103,7 @@ namespace ARSoft.Tools.Net.Dns
             private readonly SemaphoreSlim _lock = new(1, 1);
             private readonly CancellationTokenSource _cancellationTokenSource = new();
             private Task? _task;
+            private StackTrace? _lockTrace;
 
             public PoolCacheItemState State { get; private set; } = PoolCacheItemState.Pending;
             public CacheValue? Value { get; private set; }
@@ -109,8 +111,6 @@ namespace ARSoft.Tools.Net.Dns
 
             public void SetSuccessAnsRelease(CacheValue item)
             {
-                Console.WriteLine("Release");
-
                 if (State == PoolCacheItemState.Success)
                 {
                     _lock.Release();
@@ -147,8 +147,6 @@ namespace ARSoft.Tools.Net.Dns
 
             public void SetFailedAndRelease(Exception exception)
             {
-                Console.WriteLine("Release");
-
                 if (State == PoolCacheItemState.Failed)
                 {
                     _lock.Release();
@@ -185,8 +183,6 @@ namespace ARSoft.Tools.Net.Dns
 
             public void Reset()
             {
-                Console.WriteLine("Reset");
-
                 if (State == PoolCacheItemState.Pending)
                 {
                     return;
@@ -219,8 +215,6 @@ namespace ARSoft.Tools.Net.Dns
 
             public async Task ResetAsync()
             {
-                Console.WriteLine("Reset");
-
                 if (State == PoolCacheItemState.Pending)
                 {
                     return;
@@ -253,8 +247,6 @@ namespace ARSoft.Tools.Net.Dns
 
             public async Task ResetAndRelease()
             {
-                Console.WriteLine("Release");
-
                 if (State == PoolCacheItemState.Pending)
                 {
                     _lock.Release();
@@ -300,20 +292,18 @@ namespace ARSoft.Tools.Net.Dns
             {
                 _lock.Wait();
 
-                Console.WriteLine("Lock");
+                _lockTrace = new StackTrace();
             }
 
             public async Task LockAsync(CancellationToken cancellationToken)
             {
                 await _lock.WaitAsync(cancellationToken);
 
-                Console.WriteLine("Lock");
+                _lockTrace = new StackTrace();
             }
 
             public void Release()
             {
-                Console.WriteLine("Release");
-
                 _lock.Release();
             }
         }
