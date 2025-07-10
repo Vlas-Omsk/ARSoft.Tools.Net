@@ -109,7 +109,7 @@ namespace ARSoft.Tools.Net.Dns
 
             public void SetSuccessAnsRelease(CacheValue item)
             {
-                Console.WriteLine("ReleaseWithState");
+                Console.WriteLine("Release");
 
                 if (State == PoolCacheItemState.Success)
                 {
@@ -147,7 +147,7 @@ namespace ARSoft.Tools.Net.Dns
 
             public void SetFailedAndRelease(Exception exception)
             {
-                Console.WriteLine("ReleaseWithState");
+                Console.WriteLine("Release");
 
                 if (State == PoolCacheItemState.Failed)
                 {
@@ -185,7 +185,7 @@ namespace ARSoft.Tools.Net.Dns
 
             public void Reset()
             {
-                Console.WriteLine("ReleaseWithState");
+                Console.WriteLine("Reset");
 
                 if (State == PoolCacheItemState.Pending)
                 {
@@ -219,7 +219,7 @@ namespace ARSoft.Tools.Net.Dns
 
             public async Task ResetAsync()
             {
-                Console.WriteLine("ReleaseWithState");
+                Console.WriteLine("Reset");
 
                 if (State == PoolCacheItemState.Pending)
                 {
@@ -253,7 +253,7 @@ namespace ARSoft.Tools.Net.Dns
 
             public async Task ResetAndRelease()
             {
-                Console.WriteLine("ReleaseWithState");
+                Console.WriteLine("Release");
 
                 if (State == PoolCacheItemState.Pending)
                 {
@@ -298,16 +298,16 @@ namespace ARSoft.Tools.Net.Dns
 
             public void Lock()
             {
-                Console.WriteLine("Lock");
-
                 _lock.Wait();
+
+                Console.WriteLine("Lock");
             }
 
-            public Task LockAsync(CancellationToken cancellationToken)
+            public async Task LockAsync(CancellationToken cancellationToken)
             {
-                Console.WriteLine("Lock");
+                await _lock.WaitAsync(cancellationToken);
 
-                return _lock.WaitAsync(cancellationToken);
+                Console.WriteLine("Lock");
             }
 
             public void Release()
