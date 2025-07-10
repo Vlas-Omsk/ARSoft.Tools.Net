@@ -179,6 +179,33 @@ namespace ARSoft.Tools.Net.Dns
                 _lock.Release();
             }
 
+            public async Task Reset()
+            {
+                if (State == PoolCacheItemState.Pending)
+                {
+                    return;
+                }
+                else if (State == PoolCacheItemState.Failed)
+                {
+                }
+                else if (State == PoolCacheItemState.Success)
+                {
+                }
+                else
+                {
+                    throw new NotSupportedException($"State '{State}' of cached item not supported in current context");
+                }
+
+                if (Value is IAsyncDisposable asyncDisposable)
+                    await asyncDisposable.DisposeAsync();
+                else if (Value is IDisposable disposable)
+                    disposable.Dispose();
+
+                _task = null;
+                Value = null;
+                State = PoolCacheItemState.Pending;
+            }
+
             public async Task ResetAndRelease()
             {
                 if (State == PoolCacheItemState.Pending)
@@ -269,7 +296,7 @@ namespace ARSoft.Tools.Net.Dns
             return cachedItem;
         }
 
-        public async Task<CachedItem> GetAsync(CacheKey key, CancellationToken cancellationToken)
+        public async Task<CachedItem> GetAndLockAsync(CacheKey key, CancellationToken cancellationToken)
         {
             if (_disposing == 1)
                 throw new ObjectDisposedException("Object disposing");

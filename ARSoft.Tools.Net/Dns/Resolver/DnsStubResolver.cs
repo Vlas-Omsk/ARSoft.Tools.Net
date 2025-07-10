@@ -176,7 +176,7 @@ namespace ARSoft.Tools.Net.Dns
 		{
 			_ = name ?? throw new ArgumentNullException(nameof(name), "Name must be provided");
 
-            var cacheItem = _cache.GetAndLock(new DnsCache.CacheKey(name, recordType, recordClass));
+            var cacheItem = await _cache.GetAndLockAsync(new DnsCache.CacheKey(name, recordType, recordClass));
 
             if (cacheItem.State == PoolCacheItemState.Success)
             {
@@ -186,11 +186,13 @@ namespace ARSoft.Tools.Net.Dns
             }
             else if (cacheItem.State == PoolCacheItemState.Failed)
             {
-                // Continue processing
+				await cacheItem.Reset();
+
+                // Retrying
             }
             else if (cacheItem.State == PoolCacheItemState.Pending)
             {
-                // Continue processing
+                // Resolving
             }
             else
             {
