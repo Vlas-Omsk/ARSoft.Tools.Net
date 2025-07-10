@@ -109,6 +109,8 @@ namespace ARSoft.Tools.Net.Dns
 
             public void SetSuccessAnsRelease(CacheValue item)
             {
+                Console.WriteLine("ReleaseWithState");
+
                 if (State == PoolCacheItemState.Success)
                 {
                     _lock.Release();
@@ -145,6 +147,8 @@ namespace ARSoft.Tools.Net.Dns
 
             public void SetFailedAndRelease(Exception exception)
             {
+                Console.WriteLine("ReleaseWithState");
+
                 if (State == PoolCacheItemState.Failed)
                 {
                     _lock.Release();
@@ -181,6 +185,8 @@ namespace ARSoft.Tools.Net.Dns
 
             public void Reset()
             {
+                Console.WriteLine("ReleaseWithState");
+
                 if (State == PoolCacheItemState.Pending)
                 {
                     return;
@@ -196,18 +202,25 @@ namespace ARSoft.Tools.Net.Dns
                     throw new NotSupportedException($"State '{State}' of cached item not supported in current context");
                 }
 
-                if (Value is IDisposable disposable)
-                    disposable.Dispose();
-                else if (Value is IAsyncDisposable asyncDisposable)
-                    asyncDisposable.DisposeAsync().GetAwaiter().GetResult();
-
-                _task = null;
-                Value = null;
-                State = PoolCacheItemState.Pending;
+                try
+                {
+                    if (Value is IDisposable disposable)
+                        disposable.Dispose();
+                    else if (Value is IAsyncDisposable asyncDisposable)
+                        asyncDisposable.DisposeAsync().GetAwaiter().GetResult();
+                }
+                finally
+                {
+                    _task = null;
+                    Value = null;
+                    State = PoolCacheItemState.Pending;
+                }
             }
 
             public async Task ResetAsync()
             {
+                Console.WriteLine("ReleaseWithState");
+
                 if (State == PoolCacheItemState.Pending)
                 {
                     return;
@@ -223,18 +236,25 @@ namespace ARSoft.Tools.Net.Dns
                     throw new NotSupportedException($"State '{State}' of cached item not supported in current context");
                 }
 
-                if (Value is IAsyncDisposable asyncDisposable)
-                    await asyncDisposable.DisposeAsync();
-                else if (Value is IDisposable disposable)
-                    disposable.Dispose();
-
-                _task = null;
-                Value = null;
-                State = PoolCacheItemState.Pending;
+                try
+                {
+                    if (Value is IAsyncDisposable asyncDisposable)
+                        await asyncDisposable.DisposeAsync();
+                    else if (Value is IDisposable disposable)
+                        disposable.Dispose();
+                }
+                finally
+                {
+                    _task = null;
+                    Value = null;
+                    State = PoolCacheItemState.Pending;
+                }
             }
 
             public async Task ResetAndRelease()
             {
+                Console.WriteLine("ReleaseWithState");
+
                 if (State == PoolCacheItemState.Pending)
                 {
                     _lock.Release();
@@ -254,29 +274,21 @@ namespace ARSoft.Tools.Net.Dns
                     throw new NotSupportedException($"State '{State}' of cached item not supported in current context");
                 }
 
-                if (Value is IAsyncDisposable asyncDisposable)
-                    await asyncDisposable.DisposeAsync();
-                else if (Value is IDisposable disposable)
-                    disposable.Dispose();
+                try
+                {
+                    if (Value is IAsyncDisposable asyncDisposable)
+                        await asyncDisposable.DisposeAsync();
+                    else if (Value is IDisposable disposable)
+                        disposable.Dispose();
+                }
+                finally
+                {
+                    _task = null;
+                    Value = null;
+                    State = PoolCacheItemState.Pending;
 
-                _task = null;
-                Value = null;
-                State = PoolCacheItemState.Pending;
-
-                _lock.Release();
-            }
-
-            public void Throw()
-            {
-                if (CheckAll(Exception!, x => x is OperationCanceledException))
-                    throw new OperationCanceledException("Cached item was cancelled", Exception);
-
-                throw new Exception("Cached item was failed", Exception);
-            }
-
-            public void Wait()
-            {
-                _task!.GetAwaiter().GetResult();
+                    _lock.Release();
+                }
             }
 
             public Task WaitAsync(CancellationToken cancellationToken)
@@ -286,16 +298,22 @@ namespace ARSoft.Tools.Net.Dns
 
             public void Lock()
             {
+                Console.WriteLine("Lock");
+
                 _lock.Wait();
             }
 
             public Task LockAsync(CancellationToken cancellationToken)
             {
+                Console.WriteLine("Lock");
+
                 return _lock.WaitAsync(cancellationToken);
             }
 
             public void Release()
             {
+                Console.WriteLine("Release");
+
                 _lock.Release();
             }
         }

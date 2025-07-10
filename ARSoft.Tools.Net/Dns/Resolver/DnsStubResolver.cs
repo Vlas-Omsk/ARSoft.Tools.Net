@@ -182,7 +182,6 @@ namespace ARSoft.Tools.Net.Dns
 
 			try
 			{
-
 				if (cacheItem.State == PoolCacheItemState.Success)
 				{
 					cacheItem.Release();
