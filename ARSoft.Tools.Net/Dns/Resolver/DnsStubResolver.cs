@@ -180,51 +180,61 @@ namespace ARSoft.Tools.Net.Dns
 
             var cacheItem = await _cache.GetAndLockAsync(new DnsCache.CacheKey(name, recordType, recordClass), token);
 
-            if (cacheItem.State == PoolCacheItemState.Success)
-            {
-                cacheItem.Release();
-
-                return cacheItem.Value!.Records.List.OfType<T>();
-            }
-            else if (cacheItem.State == PoolCacheItemState.Failed)
-            {
-				await cacheItem.ResetAsync();
-
-                // Retrying
-            }
-            else if (cacheItem.State == PoolCacheItemState.Pending)
-            {
-                // Resolving
-            }
-            else
-            {
-                throw new NotSupportedException("State not supported");
-            }
-
-			cacheItem.SetTask(async cancellationToken =>
+			try
 			{
-				try
-				{
-					var records = await ResolveAsyncInternal<T>(name, recordType, recordClass, cancellationToken, new ResolveLoopProtector()).ToListAsync(cancellationToken);
 
-					cacheItem.SetSuccessAnsRelease(
-						new DnsCache.CacheValue(
-							new DnsCache.CacheRecordList(records, DnsSecValidationResult.Indeterminate),
-							records.Count == 0 ? 0 : records.Min(x => x.TimeToLive)
-						)
-					);
+				if (cacheItem.State == PoolCacheItemState.Success)
+				{
+					cacheItem.Release();
+
+					return cacheItem.Value!.Records.List.OfType<T>();
 				}
-				catch (Exception ex)
+				else if (cacheItem.State == PoolCacheItemState.Failed)
 				{
-					cacheItem.SetFailedAndRelease(ex);
+					await cacheItem.ResetAsync();
 
-                    throw;
-                }
-			});
+					// Retrying
+				}
+				else if (cacheItem.State == PoolCacheItemState.Pending)
+				{
+					// Resolving
+				}
+				else
+				{
+					throw new NotSupportedException("State not supported");
+				}
 
-			await cacheItem.WaitAsync(token);
+				cacheItem.SetTask(async cancellationToken =>
+				{
+					try
+					{
+						var records = await ResolveAsyncInternal<T>(name, recordType, recordClass, cancellationToken, new ResolveLoopProtector()).ToListAsync(cancellationToken);
 
-			return cacheItem.Value!.Records.List.OfType<T>();
+						cacheItem.SetSuccessAnsRelease(
+							new DnsCache.CacheValue(
+								new DnsCache.CacheRecordList(records, DnsSecValidationResult.Indeterminate),
+								records.Count == 0 ? 0 : records.Min(x => x.TimeToLive)
+							)
+						);
+					}
+					catch (Exception ex)
+					{
+						cacheItem.SetFailedAndRelease(ex);
+
+						throw;
+					}
+				});
+
+				await cacheItem.WaitAsync(token);
+
+				return cacheItem.Value!.Records.List.OfType<T>();
+			}
+			catch
+			{
+				cacheItem.Release();
+
+				throw;
+            }
 		}
 
 		private async IAsyncEnumerable<T> ResolveAsyncInternal<T>(DomainName name, RecordType recordType, RecordClass recordClass, [EnumeratorCancellation] CancellationToken token, ResolveLoopProtector resolveLoopProtector) where T : DnsRecordBase
