@@ -179,7 +179,34 @@ namespace ARSoft.Tools.Net.Dns
                 _lock.Release();
             }
 
-            public async Task Reset()
+            public void Reset()
+            {
+                if (State == PoolCacheItemState.Pending)
+                {
+                    return;
+                }
+                else if (State == PoolCacheItemState.Failed)
+                {
+                }
+                else if (State == PoolCacheItemState.Success)
+                {
+                }
+                else
+                {
+                    throw new NotSupportedException($"State '{State}' of cached item not supported in current context");
+                }
+
+                if (Value is IDisposable disposable)
+                    disposable.Dispose();
+                else if (Value is IAsyncDisposable asyncDisposable)
+                    asyncDisposable.DisposeAsync().GetAwaiter().GetResult();
+
+                _task = null;
+                Value = null;
+                State = PoolCacheItemState.Pending;
+            }
+
+            public async Task ResetAsync()
             {
                 if (State == PoolCacheItemState.Pending)
                 {

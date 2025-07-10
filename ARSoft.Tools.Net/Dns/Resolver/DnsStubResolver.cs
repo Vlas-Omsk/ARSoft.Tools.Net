@@ -89,6 +89,8 @@ namespace ARSoft.Tools.Net.Dns
             }
             else if (cacheItem.State == PoolCacheItemState.Failed)
             {
+				cacheItem.Reset();
+
                 // Continue processing
             }
             else if (cacheItem.State == PoolCacheItemState.Pending)
@@ -117,7 +119,7 @@ namespace ARSoft.Tools.Net.Dns
             {
                 cacheItem.SetFailedAndRelease(ex);
 
-                throw new Exception("Resolve failed", ex);
+                throw;
             }
         }
 
@@ -176,7 +178,7 @@ namespace ARSoft.Tools.Net.Dns
 		{
 			_ = name ?? throw new ArgumentNullException(nameof(name), "Name must be provided");
 
-            var cacheItem = await _cache.GetAndLockAsync(new DnsCache.CacheKey(name, recordType, recordClass));
+            var cacheItem = await _cache.GetAndLockAsync(new DnsCache.CacheKey(name, recordType, recordClass), token);
 
             if (cacheItem.State == PoolCacheItemState.Success)
             {
@@ -186,7 +188,7 @@ namespace ARSoft.Tools.Net.Dns
             }
             else if (cacheItem.State == PoolCacheItemState.Failed)
             {
-				await cacheItem.Reset();
+				await cacheItem.ResetAsync();
 
                 // Retrying
             }
@@ -216,7 +218,7 @@ namespace ARSoft.Tools.Net.Dns
 				{
 					cacheItem.SetFailedAndRelease(ex);
 
-                    throw new Exception("Resolve failed", ex);
+                    throw;
                 }
 			});
 
